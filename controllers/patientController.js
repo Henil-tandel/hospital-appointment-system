@@ -64,6 +64,21 @@ exports.searchDoctors = async (req, res) => {
     }
 };
 
+//Search for Doctors by Specialization
+exports.searchDoctorsBySpecialzation = async (req,res) => {
+    try{
+        const {specialization} = req.query;
+        if(!specialization){
+            return res.status(400).json({message:"Specialization is required"});
+        }
+        const doctor = await Doctor.find({specialization});
+        res.json(doctor);
+    }
+    catch(error){
+        res.status(500).json({message:"Error fetching doctors by specialization",error});
+    }    
+}
+
 // Book an Appointment
 exports.bookAppointment = async (req, res) => {
     try {
