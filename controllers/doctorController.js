@@ -2,6 +2,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const Doctor = require("../models/Doctor");
 
+
 // Register Doctor
 exports.registerDoctor = async (req, res) => {
     try {
@@ -42,11 +43,27 @@ exports.loginDoctor = async (req, res) => {
     }
 };
 
+
 // Add Availability
 exports.addAvailability = async (req, res) => {
     try {
         const { doctorId, date, slots } = req.body;
-        await Doctor.findByIdAndUpdate(doctorId, { $push: { availability: { date, slots } } });
+
+        // Date is passed as a string, we can convert it to a Date object
+        const formattedDate = new Date(date); 
+
+        // Ensure slots are in the correct format
+        const formattedSlots = slots.map(slot => ({
+            startTime: slot.startTime,
+            endTime: slot.endTime,
+            booked: slot.booked || false  // Default to false if not provided
+        }));
+
+        // Add availability to the doctor's schedule
+        await Doctor.findByIdAndUpdate(doctorId, { 
+            $push: { availability: { date: formattedDate, slots: formattedSlots } } 
+        });
+
         res.status(200).json({ message: "Availability updated successfully" });
     } catch (error) {
         res.status(500).json({ message: "Error updating availability", error });
