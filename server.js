@@ -4,7 +4,7 @@ require("dotenv").config();
 // Import dependencies
 const express = require("express");
 const cors = require("cors");
-const connectDB = require("./config/db");
+const connectDb = require("./config/db");
 
 // Import routes
 const doctorRoutes = require("./routes/doctorRoutes");
@@ -18,7 +18,7 @@ app.use(express.json());
 app.use(cors()); 
 
 // Connect to MongoDB
-connectDB();
+connectDb();
 
 // Define routes
 app.use("/api/doctors", doctorRoutes);
