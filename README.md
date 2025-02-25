@@ -9,6 +9,7 @@ This is a Hospital Appointment System API built with Node.js, Express, and Mongo
 - Search for doctors by specialization and availability
 - Book appointments
 - View patient appointments
+- Forgot and reset password for patients and doctors
 
 ## Technologies Used
 
@@ -45,6 +46,8 @@ This is a Hospital Appointment System API built with Node.js, Express, and Mongo
     PORT=5000
     MONGO_URI=your_mongodb_connection_string
     JWT_SECRET=your_jwt_secret
+    EMAIL=your_email
+    EMAIL_PASSWORD=your_email_password
     ```
 
 4. Start the server:
@@ -63,12 +66,16 @@ The server will start on `http://localhost:5000`.
 - `GET /api/patients/search-doctors` - Search for doctors by specialization and availability
 - `POST /api/patients/book-appointment` - Book an appointment (requires authentication)
 - `GET /api/patients/appointments/:patientId` - View patient appointments (requires authentication)
+- `POST /api/patients/forgot-password` - Forgot password for patient
+- `POST /api/patients/reset-password/:token` - Reset password for patient
 
 ### Doctor Routes
 
 - `POST /api/doctors/register` - Register a new doctor
 - `POST /api/doctors/login` - Login a doctor
 - `POST /api/doctors/add-availability` - Add availability (requires authentication)
+- `POST /api/doctors/forgot-password` - Forgot password for doctor
+- `POST /api/doctors/reset-password/:token` - Reset password for doctor
 
 ## License
 
