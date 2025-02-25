@@ -1,6 +1,15 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const Doctor = require("../models/Doctor");
+const nodemailer = require("nodemailer");
+
+const transporter = nodemailer.createTransport({
+    service: "Gmail",
+    auth: {
+        user: process.env.EMAIL,
+        pass: process.env.EMAIL_PASSWORD
+    }
+});
 
 
 // Register Doctor
@@ -69,4 +78,59 @@ exports.addAvailability = async (req, res) => {
         res.status(500).json({ message: "Error updating availability", error });
     }
 };
+
+exports.forgotPasswordDoctor = async (req, res) => {
+    try {
+        const { email } = req.body;
+        if (!email) return res.status(400).json({ message: "Please provide email" });
+        
+        const doctor = await Doctor.findOne({ email });
+        if (!doctor) return res.status(404).json({ message: "Doctor not found" });
+
+        const token = jwt.sign({ email }, process.env.JWT_SECRET, { expiresIn: "1h" });
+        const mailOptions = {
+            from: process.env.EMAIL,
+            to: email,
+            subject: "Password Reset Request",
+            text: `Please click on the link to reset your password: http://localhost:5000/api/doctors/reset-password/${token}`
+        };
+        
+        await transporter.sendMail(mailOptions);
+        res.status(200).json({ message: "Password reset link sent successfully" });
+    } catch (error) {
+        res.status(500).json({ message: "Error sending email", error });
+    }
+};
+
+// Reset Password
+exports.resetPasswordDoctor = async (req, res) => {
+    try {
+        const { token } = req.params;
+        const { password } = req.body;
+
+        if (!token || !password) {
+            return res.status(400).json({ message: "Token and new password are required" });
+        }
+
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        if (!decoded) return res.status(400).json({ message: "Invalid or expired token" });
+
+        const doctor = await Doctor.findOne({ email: decoded.email });
+        if (!doctor) return res.status(404).json({ message: "Doctor not found" });
+
+        // Hash and update password
+        const hashedPassword = await bcrypt.hash(password, 10);
+        doctor.password = hashedPassword;
+        await doctor.save();
+
+        // ✅ Verify the stored password
+        const updatedDoctor = await Doctor.findOne({ email: decoded.email });
+
+        res.json({ message: "Password reset successfully" });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Error resetting password", error: error.message });
+    }
+};
+
 
