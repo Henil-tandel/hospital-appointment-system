@@ -1,8 +1,17 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const nodemailer = require("nodemailer");
 const Patient = require("../models/Patient");
 const Doctor = require("../models/Doctor");
 const Appointment = require("../models/Appointment");
+
+const transporter = nodemailer.createTransport({
+    service: "Gmail",
+    auth: {
+        user: process.env.EMAIL,
+        pass: process.env.EMAIL_PASSWORD
+    }
+});
 
 // Register Patient
 exports.registerPatient = async (req, res) => {
@@ -31,17 +40,24 @@ exports.loginPatient = async (req, res) => {
         }
 
         const patient = await Patient.findOne({ email });
-        if (!patient || !(await bcrypt.compare(password, patient.password))) {
-            return res.status(400).json({ message: "Invalid credentials" });
+        if (!patient) {
+            return res.status(400).json({ message: "Invalid credentials (user not found)" });
+        }
+
+        console.log("Stored Hashed Password:", patient.password);
+
+        const isMatch = await bcrypt.compare(password, patient.password);
+        if (!isMatch) {
+            return res.status(400).json({ message: "Invalid credentials (password mismatch)" });
         }
 
         const token = jwt.sign({ id: patient._id, role: "patient" }, process.env.JWT_SECRET, { expiresIn: "1d" });
-
         res.json({ message: "Login successful", token });
     } catch (error) {
         res.status(500).json({ message: "Error logging in", error });
     }
 };
+
 
 // Search for Doctors by Specialization & Availability
 exports.searchDoctors = async (req, res) => {
@@ -64,26 +80,24 @@ exports.searchDoctors = async (req, res) => {
     }
 };
 
-//Search for Doctors by Specialization
-exports.searchDoctorsBySpecialzation = async (req,res) => {
-    try{
-        const {specialization} = req.query;
-        if(!specialization){
-            return res.status(400).json({message:"Specialization is required"});
+// Search for Doctors by Specialization
+exports.searchDoctorsBySpecialzation = async (req, res) => {
+    try {
+        const { specialization } = req.query;
+        if (!specialization) {
+            return res.status(400).json({ message: "Specialization is required" });
         }
-        const doctor = await Doctor.find({specialization});
-        res.json(doctor);
+        const doctors = await Doctor.find({ specialization });
+        res.json(doctors);
+    } catch (error) {
+        res.status(500).json({ message: "Error fetching doctors by specialization", error });
     }
-    catch(error){
-        res.status(500).json({message:"Error fetching doctors by specialization",error});
-    }    
-}
+};
 
 // Book an Appointment
 exports.bookAppointment = async (req, res) => {
     try {
         const { patientId, doctorId, date, timeSlot } = req.body;
-
         const doctor = await Doctor.findById(doctorId);
         if (!doctor) return res.status(404).json({ message: "Doctor not found" });
 
@@ -100,7 +114,6 @@ exports.bookAppointment = async (req, res) => {
         });
 
         if (!slotFound) return res.status(400).json({ message: "Time slot not available" });
-
         await doctor.save();
 
         const appointment = new Appointment({ patientId, doctorId, date, timeSlot });
@@ -117,10 +130,65 @@ exports.getAppointments = async (req, res) => {
     try {
         const { patientId } = req.params;
         if (!patientId) return res.status(400).json({ message: "Patient ID is required" });
-
         const appointments = await Appointment.find({ patientId }).populate("doctorId", "name specialization");
         res.json(appointments);
     } catch (error) {
         res.status(500).json({ message: "Error fetching appointments", error });
     }
 };
+
+// Forgot Password
+exports.forgotPasswordPatient = async (req, res) => {
+    try {
+        const { email } = req.body;
+        if (!email) return res.status(400).json({ message: "Please provide email" });
+        
+        const patient = await Patient.findOne({ email });
+        if (!patient) return res.status(404).json({ message: "Patient not found" });
+
+        const token = jwt.sign({ email }, process.env.JWT_SECRET, { expiresIn: "1h" });
+        const mailOptions = {
+            from: process.env.EMAIL,
+            to: email,
+            subject: "Password Reset Request",
+            text: `Please click on the link to reset your password: http://localhost:5000/api/patients/reset-password/${token}`
+        };
+        
+        await transporter.sendMail(mailOptions);
+        res.status(200).json({ message: "Password reset link sent successfully" });
+    } catch (error) {
+        res.status(500).json({ message: "Error sending email", error });
+    }
+};
+
+// Reset Password
+exports.resetPasswordPatient = async (req, res) => {
+    try {
+        const { token } = req.params;
+        const { password } = req.body;
+
+        if (!token || !password) {
+            return res.status(400).json({ message: "Token and new password are required" });
+        }
+
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        if (!decoded) return res.status(400).json({ message: "Invalid or expired token" });
+
+        const patient = await Patient.findOne({ email: decoded.email });
+        if (!patient) return res.status(404).json({ message: "Patient not found" });
+
+        // Hash and update password
+        const hashedPassword = await bcrypt.hash(password, 10);
+        patient.password = hashedPassword;
+        await patient.save();
+
+        // ✅ Verify the stored password
+        const updatedPatient = await Patient.findOne({ email: decoded.email });
+
+        res.json({ message: "Password reset successfully" });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Error resetting password", error: error.message });
+    }
+};
+
