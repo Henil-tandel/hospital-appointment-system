@@ -79,6 +79,45 @@ exports.addAvailability = async (req, res) => {
     }
 };
 
+// Fetch Doctor's Appointments
+exports.getDoctorAppointments = async (req, res) => {
+    try {
+        const { doctorId } = req.params;
+        if (!doctorId) return res.status(400).json({ message: "Doctor ID is required" });
+
+        const appointments = await Appointment.find({ doctorId }).populate("patientId", "name age gender");
+        res.json(appointments);
+    } catch (error) {
+        res.status(500).json({ message: "Error fetching appointments", error });
+    }
+};
+
+// Update Appointment
+exports.updateAppointment = async (req, res) => {
+    try {
+        const { appointmentId } = req.params;
+        const { date, timeSlot, status } = req.body;
+
+        // Check if appointment exists
+        const appointment = await Appointment.findById(appointmentId);
+        if (!appointment) {
+            return res.status(404).json({ message: "Appointment not found" });
+        }
+
+        // Update fields if provided
+        if (date) appointment.date = date;
+        if (timeSlot) appointment.timeSlot = timeSlot;
+        if (status) appointment.status = status;
+
+        await appointment.save();
+
+        res.status(200).json({ message: "Appointment updated successfully", appointment });
+    } catch (error) {
+        res.status(500).json({ message: "Error updating appointment", error });
+    }
+};
+
+
 exports.forgotPasswordDoctor = async (req, res) => {
     try {
         const { email } = req.body;
