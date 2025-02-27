@@ -137,6 +137,39 @@ exports.getAppointments = async (req, res) => {
     }
 };
 
+//Cancel appointment
+exports.cancelAppointment = async(req,res) => {
+    try{
+        const  { appointmentId } = req.params;
+    if(!appointmentId) return res.status(400).json({message : "Appointment ID is required"});
+    const appointment = await Appointment.findById(appointmentId);
+
+    if(!appointment) return res.status(404).json({message : "Appointment not found"});
+
+    const doctor = await Doctor.findById(appointment.doctorId);
+    if(!doctor) return res.status(404).json({message : "Doctor not found"});
+
+    doctor.availability.forEach((avail) => {
+        if(avail.date.toISOString().split('T')[0] === appointment.date.toISOString().split('T')[0]){
+            avail.slots.forEach((slot) => {
+                if(slot.startTime === appointment.timeSlot){
+                    slot.booked = false;
+                }
+            });
+        } 
+    })
+    await doctor.save();
+
+     // Remove appointment from DB
+     await Appointment.findByIdAndDelete(appointmentId);
+     res.json({ message: "Appointment cancelled successfully" });
+    }
+    catch(error){
+        res.status(500).json({message : "Error cancelling appointment", error});
+    }
+}
+
+
 // Forgot Password
 exports.forgotPasswordPatient = async (req, res) => {
     try {
