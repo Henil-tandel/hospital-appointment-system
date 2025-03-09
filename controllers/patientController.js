@@ -1,6 +1,7 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const nodemailer = require("nodemailer");
+const { validationResult, check } = require("express-validator");
 const Patient = require("../models/Patient");
 const Doctor = require("../models/Doctor");
 const Appointment = require("../models/Appointment");
@@ -16,9 +17,20 @@ const transporter = nodemailer.createTransport({
 // Register Patient
 exports.registerPatient = async (req, res) => {
     try {
+        await check("email", "Valid email is required").isEmail().run(req);
+        await check("password", "Password must be at least 6 characters").isLength({ min: 6 }).run(req);
+        await check("age", "Age must be a number").isNumeric().run(req);
+        await check("gender", "Gender is required").notEmpty().run(req);
+
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ errors: errors.array() });
+        }
+
         const { name, email, password, age, gender } = req.body;
-        if (!name || !email || !password || !age || !gender) {
-            return res.status(400).json({ message: "All fields are required" });
+        const existingPatient = await Patient.findOne({ email });
+        if (existingPatient) {
+            return res.status(400).json({ message: "Email already registered" });
         }
 
         const hashedPassword = await bcrypt.hash(password, 10);
@@ -27,37 +39,35 @@ exports.registerPatient = async (req, res) => {
 
         res.status(201).json({ message: "Patient registered successfully" });
     } catch (error) {
-        res.status(500).json({ message: "Error registering patient", error });
+        console.error("Error registering patient:", error);
+        res.status(500).json({ message: "Internal Server Error" });
     }
 };
 
 // Patient Login
 exports.loginPatient = async (req, res) => {
     try {
+        await check("email", "Valid email is required").isEmail().run(req);
+        await check("password", "Password is required").notEmpty().run(req);
+
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ errors: errors.array() });
+        }
+
         const { email, password } = req.body;
-        if (!email || !password) {
-            return res.status(400).json({ message: "Email and password are required" });
-        }
-
         const patient = await Patient.findOne({ email });
-        if (!patient) {
-            return res.status(400).json({ message: "Invalid credentials (user not found)" });
-        }
-
-        console.log("Stored Hashed Password:", patient.password);
-
-        const isMatch = await bcrypt.compare(password, patient.password);
-        if (!isMatch) {
-            return res.status(400).json({ message: "Invalid credentials (password mismatch)" });
+        if (!patient || !(await bcrypt.compare(password, patient.password))) {
+            return res.status(400).json({ message: "Invalid email or password" });
         }
 
         const token = jwt.sign({ id: patient._id, role: "patient" }, process.env.JWT_SECRET, { expiresIn: "1d" });
         res.json({ message: "Login successful", token });
     } catch (error) {
-        res.status(500).json({ message: "Error logging in", error });
+        console.error("Error logging in:", error);
+        res.status(500).json({ message: "Internal Server Error" });
     }
 };
-
 
 // Search for Doctors by Specialization & Availability
 exports.searchDoctors = async (req, res) => {
@@ -76,35 +86,48 @@ exports.searchDoctors = async (req, res) => {
 
         res.json(availableDoctors);
     } catch (error) {
-        res.status(500).json({ message: "Error fetching available doctors", error });
+        console.error("Error fetching doctors:", error);
+        res.status(500).json({ message: "Internal Server Error" });
     }
 };
 
 // Search for Doctors by Specialization
-exports.searchDoctorsBySpecialzation = async (req, res) => {
+exports.searchDoctorsBySpecialization = async (req, res) => {
     try {
         const { specialization } = req.query;
         if (!specialization) {
             return res.status(400).json({ message: "Specialization is required" });
         }
+
         const doctors = await Doctor.find({ specialization });
         res.json(doctors);
     } catch (error) {
-        res.status(500).json({ message: "Error fetching doctors by specialization", error });
+        console.error("Error fetching doctors:", error);
+        res.status(500).json({ message: "Internal Server Error" });
     }
 };
 
 // Book an Appointment
 exports.bookAppointment = async (req, res) => {
     try {
+        await check("patientId", "Patient ID is required").notEmpty().run(req);
+        await check("doctorId", "Doctor ID is required").notEmpty().run(req);
+        await check("date", "Valid date is required").isISO8601().run(req);
+        await check("timeSlot", "Time slot is required").notEmpty().run(req);
+
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ errors: errors.array() });
+        }
+
         const { patientId, doctorId, date, timeSlot } = req.body;
         const doctor = await Doctor.findById(doctorId);
         if (!doctor) return res.status(404).json({ message: "Doctor not found" });
 
         let slotFound = false;
-        doctor.availability.forEach((avail) => {
+        doctor.availability.forEach(avail => {
             if (avail.date.toISOString().split("T")[0] === date) {
-                avail.slots.forEach((slot) => {
+                avail.slots.forEach(slot => {
                     if (slot.startTime === timeSlot && !slot.booked) {
                         slot.booked = true;
                         slotFound = true;
@@ -121,7 +144,8 @@ exports.bookAppointment = async (req, res) => {
 
         res.status(201).json({ message: "Appointment booked successfully" });
     } catch (error) {
-        res.status(500).json({ message: "Error booking appointment", error });
+        console.error("Error booking appointment:", error);
+        res.status(500).json({ message: "Internal Server Error" });
     }
 };
 
@@ -130,73 +154,81 @@ exports.getAppointments = async (req, res) => {
     try {
         const { patientId } = req.params;
         if (!patientId) return res.status(400).json({ message: "Patient ID is required" });
+
         const appointments = await Appointment.find({ patientId }).populate("doctorId", "name specialization");
         res.json(appointments);
     } catch (error) {
-        res.status(500).json({ message: "Error fetching appointments", error });
+        console.error("Error fetching appointments:", error);
+        res.status(500).json({ message: "Internal Server Error" });
     }
 };
 
-//Cancel appointment
-exports.cancelAppointment = async(req,res) => {
-    try{
-        const  { appointmentId } = req.params;
-    if(!appointmentId) return res.status(400).json({message : "Appointment ID is required"});
-    const appointment = await Appointment.findById(appointmentId);
+// Cancel Appointment
+exports.cancelAppointment = async (req, res) => {
+    try {
+        const { appointmentId } = req.params;
+        if (!appointmentId) return res.status(400).json({ message: "Appointment ID is required" });
 
-    if(!appointment) return res.status(404).json({message : "Appointment not found"});
+        const appointment = await Appointment.findById(appointmentId);
+        if (!appointment) return res.status(404).json({ message: "Appointment not found" });
 
-    const doctor = await Doctor.findById(appointment.doctorId);
-    if(!doctor) return res.status(404).json({message : "Doctor not found"});
+        const doctor = await Doctor.findById(appointment.doctorId);
+        if (!doctor) return res.status(404).json({ message: "Doctor not found" });
 
-    doctor.availability.forEach((avail) => {
-        if(avail.date.toISOString().split('T')[0] === appointment.date.toISOString().split('T')[0]){
-            avail.slots.forEach((slot) => {
-                if(slot.startTime === appointment.timeSlot){
-                    slot.booked = false;
-                }
-            });
-        } 
-    })
-    await doctor.save();
+        doctor.availability.forEach(avail => {
+            if (avail.date.toISOString().split("T")[0] === appointment.date.toISOString().split("T")[0]) {
+                avail.slots.forEach(slot => {
+                    if (slot.startTime === appointment.timeSlot) {
+                        slot.booked = false;
+                    }
+                });
+            }
+        });
 
-     // Remove appointment from DB
-     await Appointment.findByIdAndDelete(appointmentId);
-     res.json({ message: "Appointment cancelled successfully" });
+        await doctor.save();
+        await Appointment.findByIdAndDelete(appointmentId);
+        res.json({ message: "Appointment cancelled successfully" });
+    } catch (error) {
+        console.error("Error cancelling appointment:", error);
+        res.status(500).json({ message: "Internal Server Error" });
     }
-    catch(error){
-        res.status(500).json({message : "Error cancelling appointment", error});
-    }
-}
-
+};
 
 // Forgot Password
 exports.forgotPasswordPatient = async (req, res) => {
     try {
         const { email } = req.body;
-        if (!email) return res.status(400).json({ message: "Please provide email" });
-        
+        if (!email) return res.status(400).json({ message: "Email is required" });
+
         const patient = await Patient.findOne({ email });
         if (!patient) return res.status(404).json({ message: "Patient not found" });
 
         const token = jwt.sign({ email }, process.env.JWT_SECRET, { expiresIn: "1h" });
-        const mailOptions = {
+        await transporter.sendMail({
             from: process.env.EMAIL,
             to: email,
             subject: "Password Reset Request",
-            text: `Please click on the link to reset your password: http://localhost:5000/api/patients/reset-password/${token}`
-        };
-        
-        await transporter.sendMail(mailOptions);
-        res.status(200).json({ message: "Password reset link sent successfully" });
+            text: `Reset your password: http://localhost:5000/api/patients/reset-password/${token}`
+        });
+
+        res.json({ message: "Password reset link sent" });
     } catch (error) {
-        res.status(500).json({ message: "Error sending email", error });
+        console.error("Error sending reset email:", error);
+        res.status(500).json({ message: "Internal Server Error" });
     }
 };
+
 
 // Reset Password
 exports.resetPasswordPatient = async (req, res) => {
     try {
+        await check("password", "Password must be at least 6 characters long").isLength({ min: 6 }).run(req);
+
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ errors: errors.array() });
+        }
+
         const { token } = req.params;
         const { password } = req.body;
 
@@ -215,13 +247,9 @@ exports.resetPasswordPatient = async (req, res) => {
         patient.password = hashedPassword;
         await patient.save();
 
-        // ✅ Verify the stored password
-        const updatedPatient = await Patient.findOne({ email: decoded.email });
-
         res.json({ message: "Password reset successfully" });
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: "Error resetting password", error: error.message });
+        console.error("Error resetting password:", error);
+        res.status(500).json({ message: "Internal Server Error" });
     }
 };
-
