@@ -49,7 +49,6 @@ exports.loginPatient = async (req, res) => {
     try {
         await check("email", "Valid email is required").isEmail().run(req);
         await check("password", "Password is required").notEmpty().run(req);
-
         const errors = validationResult(req);
         if (!errors.isEmpty()) {
             return res.status(400).json({ errors: errors.array() });
@@ -62,7 +61,7 @@ exports.loginPatient = async (req, res) => {
         }
 
         const token = jwt.sign({ id: patient._id, role: "patient" }, process.env.JWT_SECRET, { expiresIn: "1d" });
-        res.json({ message: "Login successful", token });
+        res.json({ message: "Login successful", token , id : patient._id , name : patient.name });
     } catch (error) {
         console.error("Error logging in:", error);
         res.status(500).json({ message: "Internal Server Error" });
