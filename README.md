@@ -6,7 +6,9 @@ This is a Hospital Appointment System API built with Node.js, Express, and Mongo
 
 - Patient registration and login
 - Doctor registration and login
-- Search for doctors by specialization and availability
+- View and update patient and doctor profiles
+- Search for doctors by specialization, location, and rating
+- Rate doctors
 - Book appointments
 - View and cancel patient appointments
 - View and update doctor appointments
@@ -64,7 +66,13 @@ The server will start on `http://localhost:5000`.
 
 - `POST /api/patients/register` - Register a new patient
 - `POST /api/patients/login` - Login a patient
+- `GET /api/patients/profile/:patientId` - View patient profile (requires authentication)
+- `PATCH /api/patients/update-details` - Update patient details (requires authentication)
 - `GET /api/patients/search-doctors` - Search for doctors by specialization and availability
+- `GET /api/patients/specialization` - Search for doctors by specialization
+- `GET /api/patients/location` - Search for doctors by location
+- `GET /api/patients/rating` - Get doctors by rating
+- `POST /api/patients/rate-doctor` - Rate a doctor (requires authentication)
 - `POST /api/patients/book-appointment` - Book an appointment (requires authentication)
 - `GET /api/patients/appointments/:patientId` - View patient appointments (requires authentication)
 - `DELETE /api/patients/delete-appointment/:appointmentId` - Cancel an appointment (requires authentication)
@@ -75,9 +83,12 @@ The server will start on `http://localhost:5000`.
 
 - `POST /api/doctors/register` - Register a new doctor
 - `POST /api/doctors/login` - Login a doctor
+- `GET /api/doctors/profile/:doctorId` - View doctor profile (requires authentication)
+- `PATCH /api/doctors/update-details` - Update doctor details (requires authentication)
 - `POST /api/doctors/add-availability` - Add availability (requires authentication)
 - `GET /api/doctors/appointments/:doctorId` - View doctor's appointments (requires authentication)
-- `PUT /api/doctors/update-appointment/:appointmentId` - Update an appointment
+- `PATCH /api/doctors/update-appointment/:appointmentId` - Update an appointment
+- `DELETE /api/doctors/delete-appointment/:appointmentId` - Cancel an appointment
 - `POST /api/doctors/forgot-password` - Forgot password for doctor
 - `POST /api/doctors/reset-password/:token` - Reset password for doctor
 
