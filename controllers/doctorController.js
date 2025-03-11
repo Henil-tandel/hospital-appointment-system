@@ -23,7 +23,7 @@ exports.registerDoctor = async (req, res) => {
             return res.status(400).json({ errors: errors.array() });
         }
 
-        const { name, email, password, specialization, experience } = req.body;
+        const { name, email, password, specialization, experience,location } = req.body;
         
         const existingDoctor = await Doctor.findOne({ email });
         if (existingDoctor) {
@@ -31,7 +31,7 @@ exports.registerDoctor = async (req, res) => {
         }
 
         const hashedPassword = await bcrypt.hash(password, 10);
-        const doctor = new Doctor({ name, email, password: hashedPassword, specialization, experience });
+        const doctor = new Doctor({ name, email, password: hashedPassword, specialization, experience,location });
         await doctor.save();
 
         res.status(201).json({ message: "Doctor registered successfully" });
@@ -65,6 +65,51 @@ exports.loginDoctor = async (req, res) => {
         res.status(500).json({ message: "Internal Server Error" });
     }
 };
+
+//Get Profile
+exports.viewProfile = async(req,res) => {
+    try { 
+        const { doctorId } = req.params;
+        const doctor = await Doctor.findById(doctorId).select("-password");
+        if(!doctor) { 
+            return res.status(404).json({message : "Doctor not found"})
+        }
+        res.status(200).json({doctor});
+    }
+    catch (error) {
+        console.error("Error updating details:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+} 
+
+// Update Doctor Details
+exports.updateDetails = async (req, res) => {
+    try {
+        await check("doctorId", "Doctor ID is required").notEmpty().run(req);
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ errors: errors.array() });
+        }
+
+        const { doctorId, name, specialization, experience ,location } = req.body;
+
+        const updatedDoctor = await Doctor.findByIdAndUpdate(
+            doctorId,
+            { name, specialization, experience,location },
+            { new: true, runValidators: true }
+        );
+
+        if (!updatedDoctor) {
+            return res.status(404).json({ message: "Doctor not found" });
+        }
+
+        res.status(200).json({ message: "Doctor details updated successfully", doctor: updatedDoctor });
+    } catch (error) {
+        console.error("Error updating details:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+};
+
 
 // Add Availability
 exports.addAvailability = async (req, res) => {
