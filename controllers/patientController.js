@@ -69,6 +69,51 @@ exports.loginPatient = async (req, res) => {
     }
 };
 
+//Get Profile
+exports.viewProfile = async(req,res) => {
+    try { 
+        const { patientId } = req.params;
+        const patient = await Patient.findById(patientId).select("-password");
+        if(!patient) { 
+            return res.status(404).json({message : "Patient not found"})
+        }
+        res.status(200).json({patient});
+    }
+    catch (error) {
+        console.error("Error updating details:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+} 
+
+// Update Patient Details
+exports.updateDetails = async (req, res) => {
+    try {
+        await check("patientId", "Patient ID is required").notEmpty().run(req);
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ errors: errors.array() });
+        }
+
+        const { patientId, name, age, gender } = req.body;
+
+        const updatedPatient = await Patient.findByIdAndUpdate(
+            patientId,
+            { name, age , gender },
+            { new: true, runValidators: true }
+        );
+
+        if (!updatedPatient) {
+            return res.status(404).json({ message: "Patient not found" });
+        }
+
+        res.status(200).json({ message: "Patient details updated successfully", patient: updatedPatient });
+    } catch (error) {
+        console.error("Error updating details:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+};
+
+
 // Search for Doctors by Specialization & Availability
 exports.searchDoctors = async (req, res) => {
     try {
@@ -103,6 +148,74 @@ exports.searchDoctorsBySpecialization = async (req, res) => {
         res.json(doctors);
     } catch (error) {
         console.error("Error fetching doctors:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+};
+
+//Search doctors by location
+exports.searchDoctorsByLocation = async (req,res) => {
+    try { 
+        const { location } = req.query;
+        if(!location) {
+            return res.status(400).json({message: "Location is required"});
+        }
+
+        const doctors = await Doctor.find( { location } );
+        if(!doctors) { 
+            res.status(400).json({message : "Doctors not found in this location"});
+        }
+        else {
+            res.json(doctors);
+        }
+    }
+    catch(err) {
+        console.error("Error fetching doctors:", err);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+}
+
+//Rate doctor
+exports.rateDoctor = async (req, res) => {
+    try {
+        const { patientId, doctorId, rating, comment } = req.body;
+
+        if (!patientId || !doctorId || rating === undefined) {
+            return res.status(400).json({ message: "Patient ID, Doctor ID, and rating are required" });
+        }
+
+        if (rating < 0 || rating > 5) {
+            return res.status(400).json({ message: "Rating must be between 0 and 5" });
+        }
+
+        const doctor = await Doctor.findById(doctorId);
+        if (!doctor) return res.status(404).json({ message: "Doctor not found" });
+
+        // Update Doctor's Rating
+        const newRatingCount = doctor.ratingCount + 1;
+        const newRating = (doctor.rating * doctor.ratingCount + rating) / newRatingCount;
+        
+        doctor.rating = newRating;
+        doctor.ratingCount = newRatingCount;
+        await doctor.save(); // Ensure changes are stored
+
+        res.json({ message: "Doctor rated successfully", doctor });
+    } catch (error) {
+        console.error("Error rating doctor:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+};
+
+//Search by rating
+exports.getDoctorsByRating = async (req, res) => {
+    try {
+        const { rating } = req.query;
+        if(!rating) {
+            return res.status(400).json({message : "Rating is required"})
+        }
+        const doctors = await Doctor.find({rating}) // Sort in descending order
+        res.status(200).json(doctors);
+    } catch (error) {
+        console.error("Error fetching doctors by rating:", error);
         res.status(500).json({ message: "Internal Server Error" });
     }
 };
