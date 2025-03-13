@@ -92,6 +92,28 @@ The server will start on `http://localhost:5000`.
 - `POST /api/doctors/forgot-password` - Forgot password for doctor
 - `POST /api/doctors/reset-password/:token` - Reset password for doctor
 
+## Response Format
+
+All API responses follow a consistent format:
+
+- Success Response:
+    ```json
+    {
+        "status": "success",
+        "message": "Descriptive message",
+        "data": { ... }
+    }
+    ```
+
+- Error Response:
+    ```json
+    {
+        "status": "error",
+        "message": "Descriptive error message",
+        "errors": [ ... ] // Optional, for validation errors
+    }
+    ```
+
 ## License
 
 This project is licensed under the MIT License.
