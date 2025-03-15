@@ -6,12 +6,15 @@ const Patient = require("../models/Patient");
 const Doctor = require("../models/Doctor");
 const Appointment = require("../models/Appointment");
 const { successResponse , errorResponse } = require("../utils/responseFormatter");
+
 const transporter = nodemailer.createTransport({
-    service: "Gmail",
+    service: "gmail",
     auth: {
         user: process.env.EMAIL,
         pass: process.env.EMAIL_PASSWORD
-    }
+    },
+    port: 587, // Use port 587 for TLS
+    secure: false, 
 });
 
 // Register Patient
@@ -204,41 +207,85 @@ exports.getDoctorsByRating = async (req, res) => {
     }
 };
 
-// Book an appointment 
+
+// Book an appointment
 exports.bookAppointment = async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
     try {
         const { patientId, doctorId, date, timeSlot } = req.body;
+        const currentTime = moment();
+
+        // Validate required fields
         if (!patientId || !doctorId || !date || !timeSlot) {
             return errorResponse(res, 400, "All fields are required");
         }
 
-        const doctor = await Doctor.findById(doctorId);
+        // Validate date format
+        if (!moment(date, "YYYY-MM-DD", true).isValid()) {
+            return errorResponse(res, 400, "Invalid date format. Use YYYY-MM-DD");
+        }
+
+        const appointmentDate = moment(date, "YYYY-MM-DD");
+
+        // Ensure appointment date is today or in the future
+        if (appointmentDate.isBefore(currentTime, "day")) {
+            return errorResponse(res, 400, "Appointments can only be booked for today or future dates");
+        }
+
+        // Ensure time slot is valid if booking for today
+        if (appointmentDate.isSame(currentTime, "day") && moment(timeSlot, "HH:mm").isBefore(currentTime.add(1, "hour"), "minute")) {
+            return errorResponse(res, 400, "Time slot must be at least 1 hour ahead of the current time");
+        }
+
+        const doctor = await Doctor.findById(doctorId).session(session);
         if (!doctor) return errorResponse(res, 404, "Doctor not found");
 
-        let slotFound = false;
-        doctor.availability.forEach(avail => {
-            if (avail.date.toISOString().split("T")[0] === date) {
-                avail.slots.forEach(slot => {
-                    if (slot.startTime === timeSlot && !slot.booked) {
-                        slot.booked = true;
-                        slotFound = true;
-                    }
-                });
-            }
-        });
+        const availability = doctor.availability.find(avail => moment(avail.date).format("YYYY-MM-DD") === date);
+        if (!availability) return errorResponse(res, 400, "No availability on this date");
 
-        if (!slotFound) return errorResponse(res, 400, "Time slot not available");
-        await doctor.save();
+        const slot = availability.slots.find(slot =>
+            moment(timeSlot, "HH:mm").isBetween(
+                moment(slot.startTime, "HH:mm"),
+                moment(slot.endTime, "HH:mm"),
+                null,
+                "[)"
+            )
+        );
+
+        if (!slot) return errorResponse(res, 400, "No available slot for the requested time");
+
+        // Get max bookings per slot from doctor availability
+        const MAX_BOOKINGS_PER_SLOT = availability.maxBookingsPerSlot || 5; // Default to 5 if not set
+
+        const existingBookings = await Appointment.countDocuments({
+            doctorId,
+            date,
+            timeSlot: { $gte: slot.startTime, $lt: slot.endTime }
+        }).session(session);
+
+        if (existingBookings >= MAX_BOOKINGS_PER_SLOT) {
+            return errorResponse(res, 400, "Time slot fully booked");
+        }
 
         const appointment = new Appointment({ patientId, doctorId, date, timeSlot });
-        await appointment.save();
+        await appointment.save({ session });
 
-        res.status(201).json({ message: "Appointment booked successfully" });
+        await session.commitTransaction();
+        session.endSession();
+
+        return successResponse(res, 201, "Appointment booked successfully",appointment);
+
     } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
         console.error("Error booking appointment:", error);
         return errorResponse(res, 500, "Internal Server Error");
     }
 };
+
+
 
 // View patient's appointments 
 exports.getAppointments = async (req, res) => {
@@ -271,54 +318,66 @@ exports.cancelAppointment = async (req, res) => {
     }
 };
 
-//Forgot password 
+// Forgot Password
 exports.forgotPasswordPatient = async (req, res) => {
     try {
-        const { email } = req.body;
-        if (!email) return errorResponse(res, 400, "Email is required");
-
-        const patient = await Patient.findOne({ email });
-        if (!patient) return errorResponse(res, 404, "Patient not found");
-
-        const token = jwt.sign({ email }, process.env.JWT_SECRET, { expiresIn: "1h" });
-        await transporter.sendMail({
-            from: process.env.EMAIL,
-            to: email,
-            subject: "Password Reset Request",
-            text: `Reset your password: http://localhost:5000/api/patients/reset-password/${token}`
-        });
-
-        res.json({ message: "Password reset link sent" });
-    } catch (error) {
-        console.error("Error sending reset email:", error);
-        return errorResponse(res, 500, "Internal Server Error");
-    }
-};  
-
-//Reset password
-exports.resetPasswordPatient = async (req, res) => {
-    try {
-        const { token } = req.params;
-        const { password } = req.body;
-
-        if (!token || !password) {
-            return errorResponse(res, 400, "Token and new password are required");
+      const { email } = req.body;
+      if (!email) return res.status(400).json({ message: "Email is required" });
+  
+      const patient = await Patient.findOne({ email });
+      if (!patient) return res.status(404).json({ message: "User not found" });
+  
+      const token = jwt.sign({ email }, process.env.JWT_SECRET, { expiresIn: "1h" });
+  
+      const resetLink = `http://localhost:5000/api/patients/reset-password/${token}`;
+  
+      transporter.sendMail({
+        from: process.env.EMAIL,
+        to: email,
+        subject: "Password Reset Request",
+        text: `Click here to reset your password: ${resetLink}`,
+    }, (error, info) => {
+        if (error) {
+          console.log('Error sending email:', error);
+          return res.status(500).json({ message: "Failed to send email" });
+        } else {
+          console.log('Email sent:', info.response);
+          return res.json({ message: "Password reset link sent to your email" });
         }
-
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        if (!decoded) return errorResponse(res, 400, "Invalid or expired token");
-
-        const patient = await Patient.findOne({ email: decoded.email });
-        if (!patient) return errorResponse(res, 404, "Patient not found");
-
-        // Hash the new password
-        const hashedPassword = await bcrypt.hash(password, 10);
-        patient.password = hashedPassword;
-        await patient.save();
-
-        res.json({ message: "Password reset successfully" });
+    });
+    
+  
+      res.json({ message: "Password reset link sent to your email" });
     } catch (error) {
-        console.error("Error resetting password:", error);
-        return errorResponse(res, 500, "Internal Server Error");
+      console.error("Error sending reset email:", error);
+      res.status(500).json({ message: "Internal Server Error" });
     }
-};
+  };
+  
+  // Reset Password
+exports.resetPasswordPatient =  async (req, res) => {
+    try {
+      const { token } = req.params;
+      const { password } = req.body;
+  
+      if (!token || !password) {
+        return res.status(400).json({ message: "Token and password are required" });
+      }
+  
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      if (!decoded) return res.status(400).json({ message: "Invalid or expired token" });
+  
+      const patient = await Patient.findOne({ email: decoded.email });
+      if (!patient) return res.status(404).json({ message: "Patient not found" });
+  
+      const hashedPassword = await bcrypt.hash(password, 10);
+      patient.password = hashedPassword;
+      await patient.save();
+  
+      res.json({ message: "Password reset successfully" });
+    } catch (error) {
+      console.error("Error resetting password:", error);
+      res.status(500).json({ message: "Internal Server Error" });
+    }
+  };
+  
