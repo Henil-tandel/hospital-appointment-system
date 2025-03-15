@@ -7,12 +7,14 @@ const patientSchema = new mongoose.Schema({
     age: { type: Number, required: true, min: 1 },
     gender: { type: String, enum: ["Male", "Female", "Other"], required: true },
     reviews: [{
-        patientId: { type: mongoose.Schema.Types.ObjectId, ref: "Patient" }, 
-        doctorId: { type: mongoose.Schema.Types.ObjectId, ref: "Doctor" },
+        patientId: { type: mongoose.Schema.Types.ObjectId, ref: "Patient", required: true }, 
+        doctorId: { type: mongoose.Schema.Types.ObjectId, ref: "Doctor", required: true },
         rating: { type: Number, required: true, min: 0, max: 5 },
-        comment: { type: String }
+        comment: { type: String, trim: true },
+        createdAt: { type: Date, default: Date.now }
     }],
     createdAt: { type: Date, default: Date.now }
 });
+
 
 module.exports = mongoose.model("Patient", patientSchema);
