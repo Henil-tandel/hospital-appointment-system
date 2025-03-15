@@ -277,7 +277,7 @@ exports.bookAppointment = async (req, res) => {
         await session.commitTransaction();
         session.endSession();
 
-        return successResponse(res, 201, "Appointment booked successfully",appointment);
+        return successResponse(res, 201, "Appointment booked successfully",a);
 
     } catch (error) {
         await session.abortTransaction();
