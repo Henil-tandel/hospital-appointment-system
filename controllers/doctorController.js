@@ -1,5 +1,6 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const moment = require('moment');
 const { validationResult, check } = require("express-validator");
 const Doctor = require("../models/Doctor");
 const Appointment = require("../models/Appointment");
@@ -104,26 +105,78 @@ exports.updateDetails = async (req, res) => {
 };
 
 // Add Availability
-exports.addAvailability = async (req, res) => {
+exports.addAvailability = async (req, res) => {   
     try {
-        const { doctorId, date, slots } = req.body;
+        const { doctorId, date, slots, maxBookingsPerSlot } = req.body; // Allow doctors to set max bookings per slot
+        const currentTime = moment();
+        const availabilityDate = moment(date, "YYYY-MM-DD");
 
-        const formattedSlots = slots.map(slot => ({
-            startTime: slot.startTime,
-            endTime: slot.endTime,
-            booked: slot.booked || false
-        }));
+        // Ensure availability is for today or a future date
+        if (availabilityDate.isBefore(currentTime, "day")) {
+            return errorResponse(res, 400, "Availability must be for today or a future date");
+        }
 
-        await Doctor.findByIdAndUpdate(doctorId, {
-            $push: { availability: { date: new Date(date), slots: formattedSlots } }
+        // Find the doctor
+        const doctor = await Doctor.findById(doctorId);
+        if (!doctor) return errorResponse(res, 404, "Doctor not found");
+
+        let existingAvailability = doctor.availability.find(avail => 
+            moment(avail.date).format("YYYY-MM-DD") === date
+        );
+
+        const newSlots = slots.filter(slot => {
+            const newSlotStartTime = moment(slot.startTime, "HH:mm");
+
+            // If adding availability for today, enforce a 1-hour gap from the current time
+            if (availabilityDate.isSame(currentTime, "day") && newSlotStartTime.isBefore(currentTime.add(1, "hour"))) {
+                return false;
+            }
+
+            // Check for duplicate slots
+            if (existingAvailability) {
+                return !existingAvailability.slots.some(existingSlot =>
+                    moment(existingSlot.startTime, "HH:mm").isSame(newSlotStartTime)
+                );
+            }
+
+            return true;
         });
 
-        return successResponse(res, 200, "Availability updated successfully");
+        if (newSlots.length === 0) {
+            return errorResponse(res, 400, "All requested slots are either duplicates or invalid");
+        }
+
+        if (existingAvailability) {
+            // Update existing availability with new slots & maxBookingsPerSlot
+            await Doctor.updateOne(
+                { _id: doctorId, "availability.date": new Date(date) },
+                { 
+                    $push: { "availability.$.slots": { $each: newSlots } },
+                    "availability.$.maxBookingsPerSlot": maxBookingsPerSlot || 5 // Default to 5 if not provided
+                }
+            );
+        } else {
+            // Create new availability entry
+            await Doctor.findByIdAndUpdate(doctorId, {
+                $push: { 
+                    availability: { 
+                        date: new Date(date), 
+                        slots: newSlots, 
+                        maxBookingsPerSlot: maxBookingsPerSlot || 5 // Default to 5
+                    } 
+                }
+            });
+        }
+
+        return successResponse(res, 200, "Availability added successfully", doctor);
     } catch (error) {
         console.error("Error updating availability:", error);
         return errorResponse(res, 500, "Internal Server Error");
     }
 };
+
+
+
 
 // Fetch Doctor's Appointments
 exports.getDoctorAppointments = async (req, res) => {
@@ -143,14 +196,33 @@ exports.updateAppointment = async (req, res) => {
     try {
         const { appointmentId } = req.params;
         const { date, time, status } = req.body;
+        const currentTime = moment();
 
         const appointment = await Appointment.findById(appointmentId);
         if (!appointment) {
             return errorResponse(res, 404, "Appointment not found");
         }
 
-        if (date) appointment.date = date;
-        if (time) appointment.time = time;
+        if (date) {
+            const newDate = moment(date, "YYYY-MM-DD");
+
+            if (newDate.isBefore(currentTime, "day")) {
+                return errorResponse(res, 400, "Updated date must be today or a future date");
+            }
+
+            appointment.date = date;
+        }
+
+        if (time) {
+            const newTime = moment(time, "HH:mm");
+
+            if (moment(appointment.date).isSame(currentTime, "day") && newTime.isBefore(currentTime.add(1, "hour"))) {
+                return errorResponse(res, 400, "Updated time must be at least 1 hour ahead of the current time");
+            }
+
+            appointment.timeSlot = time;
+        }
+
         if (status) appointment.status = status;
 
         await appointment.save();
@@ -164,7 +236,7 @@ exports.updateAppointment = async (req, res) => {
 // Cancel Appointment
 exports.cancelAppointment = async (req, res) => {
     try {
-        const { appointmentId } = req.params;
+        const { appointmentId } = req.body;
 
         const appointment = await Appointment.findById(appointmentId);
         if (!appointment) {
@@ -178,6 +250,99 @@ exports.cancelAppointment = async (req, res) => {
         return errorResponse(res, 500, "Internal Server Error");
     }
 };
+
+// Cancel Availability
+exports.cancelAvailability = async (req, res) => {
+    try {
+        const { doctorId, date } = req.body;
+        const availabilityDate = moment(date, "YYYY-MM-DD");
+
+        if (!doctorId || !date) {
+            return errorResponse(res, 400, "Doctor ID and date are required");
+        }
+
+        // Ensure date is in valid format
+        if (!availabilityDate.isValid()) {
+            return errorResponse(res, 400, "Invalid date format. Use YYYY-MM-DD");
+        }
+
+        const doctor = await Doctor.findById(doctorId);
+        if (!doctor) {
+            return errorResponse(res, 404, "Doctor not found");
+        }
+
+        // Remove availability for the given date
+        const updatedDoctor = await Doctor.findByIdAndUpdate(
+            doctorId,
+            { $pull: { availability: { date: new Date(date) } } },
+            { new: true }
+        );
+
+        return successResponse(res, 200, "Availability canceled successfully", updatedDoctor);
+    } catch (error) {
+        console.error("Error canceling availability:", error);
+        return errorResponse(res, 500, "Internal Server Error");
+    }
+};
+
+// Update Availability
+exports.updateAvailability = async (req, res) => {
+    try {
+        const { doctorId, date, slots } = req.body;
+        const availabilityDate = moment(date, "YYYY-MM-DD");
+        const currentTime = moment();
+
+        if (!doctorId || !date || !slots || !Array.isArray(slots)) {
+            return errorResponse(res, 400, "Doctor ID, date, and valid slots array are required");
+        }
+
+        // Ensure date is valid and not in the past
+        if (!availabilityDate.isValid() || availabilityDate.isBefore(currentTime, "day")) {
+            return errorResponse(res, 400, "Availability date must be today or a future date");
+        }
+
+        const doctor = await Doctor.findById(doctorId);
+        if (!doctor) return errorResponse(res, 404, "Doctor not found");
+
+        let existingAvailability = doctor.availability.find(avail => 
+            moment(avail.date).format("YYYY-MM-DD") === date
+        );
+
+        const updatedSlots = slots.filter(slot => {
+            const slotStartTime = moment(slot.startTime, "HH:mm");
+
+            // If updating availability for today, enforce a 1-hour gap from the current time
+            if (availabilityDate.isSame(currentTime, "day") && slotStartTime.isBefore(currentTime.add(1, "hour"))) {
+                return false;
+            }
+
+            return true;
+        });
+
+        if (updatedSlots.length === 0) {
+            return errorResponse(res, 400, "All updated slots are either invalid or conflict with timing restrictions");
+        }
+
+        if (existingAvailability) {
+            // Update existing slots
+            await Doctor.updateOne(
+                { _id: doctorId, "availability.date": new Date(date) },
+                { $set: { "availability.$.slots": updatedSlots } }
+            );
+        } else {
+            // Create new availability if not found
+            await Doctor.findByIdAndUpdate(doctorId, {
+                $push: { availability: { date: new Date(date), slots: updatedSlots } }
+            });
+        }
+
+        return successResponse(res, 200, "Availability updated successfully");
+    } catch (error) {
+        console.error("Error updating availability:", error);
+        return errorResponse(res, 500, "Internal Server Error");
+    }
+};
+
 
 // Forgot Password
 exports.forgotPasswordDoctor = async (req, res) => {
