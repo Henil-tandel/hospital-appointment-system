@@ -8,12 +8,18 @@ const doctorSchema = new mongoose.Schema({
     experience: { type: Number, required: true, min: 1 },
     location: { type: String, required: true },
     rating: { type: Number, default: 0, min: 0, max: 5 }, // Average rating
-    ratingCount: { type: Number, default: 0 }, // Track total reviews
+    ratingCount: { type: Number, default: 0 }, // Total number of reviews
     availability: [{ 
         date: { type: Date, required: true },
-        slots: [{ startTime: String, endTime: String, booked: Boolean }]
+        slots: [{ 
+            startTime: { type: String, required: true },
+            endTime: { type: String, required: true },
+            isBooked: { type: Boolean, default: false } // Tracks if slot is booked
+        }],
+        maxBookingsPerSlot: { type: Number, default: 5, min: 1 } // Doctor-defined limit
     }],
     createdAt: { type: Date, default: Date.now }
 });
+
 
 module.exports = mongoose.model("Doctor", doctorSchema);
